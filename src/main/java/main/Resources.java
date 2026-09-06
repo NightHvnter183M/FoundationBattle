@@ -1,20 +1,29 @@
 package main;
 
+import arc.struct.ObjectIntMap;
 import arc.struct.ObjectMap;
+import arc.struct.ObjectSet;
 import arc.struct.Seq;
 import arc.util.Log;
 import mindustry.game.Team;
 import mindustry.gen.Groups;
 import mindustry.gen.Player;
-
 import java.util.Iterator;
 
 
 public class Resources {
-    public static int welcomeMenuId, joinMenuId, AcceptMenuId;
+    public static int welcomeMenuId, teamMenuId, joinMenuId, AcceptMenuId, DenyMenuId, mapVoteMenuId;
     public static ObjectMap<Team, String> team_leaders = new ObjectMap<>();
     public static ObjectMap<String, Team> team_members = new ObjectMap<>();
     public static ObjectMap<String, String> join_requests = new ObjectMap<>();
+    public static ObjectIntMap<Integer> votes = new ObjectIntMap<>();
+    public static Boolean isRestartVoting = false;
+    public static ObjectSet<String> restartVotes = new ObjectSet<>();
+
+
+    public static String custommotd = """
+           [#008B8B]Foundation Battle - [white]Mixtech pvp server
+           [white]Time until round end :""";
 
     /// Doing here some static methods for easy use in different places
     public static boolean isLeader(Player p) {
@@ -37,7 +46,10 @@ public class Resources {
             if (entry.value == team) iterator.remove();
         }
         Groups.player.each(player -> {
-           if (player.team().equals(team)) player.team(Team.all[0]);
+           if (player.team().equals(team)) {
+               player.team(Team.all[0]);
+               if (player.unit() != null) player.unit().kill();
+           }
         });
         team.data().destroyToDerelict();
     }

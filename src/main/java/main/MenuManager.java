@@ -17,6 +17,12 @@ public class MenuManager {
            }
         });
 
+        Resources.teamMenuId = Menus.registerMenu((player, selection) -> {
+           if (selection == 0) callJoinMenu(player);
+           if (selection == 1) callAcceptMenu(player);
+           if (selection == 2) callDenyMenu(player);
+        });
+
         Resources.joinMenuId = Menus.registerMenu((player, selection) -> {
             Seq<Player> leaders = Resources.getLeaders(player);
             Player target = leaders.get(selection);
@@ -36,12 +42,31 @@ public class MenuManager {
             found.team(player.team());
             Resources.team_members.put(found.uuid(), found.team());
         });
+
+        Resources.DenyMenuId = Menus.registerMenu((player, selection) -> {
+            Seq<Player> requesters = Resources.getRequesters(player);
+            Player found = requesters.get(selection);
+            Resources.join_requests.remove(found.uuid());
+            player.sendMessage("You denied player " + found.name());
+            found.sendMessage(player.name() + " denied your join request");
+        });
+
+        Resources.mapVoteMenuId = Menus.registerMenu((player, selection) -> Resources.votes.put(selection, Resources.votes.get(selection, 0) + 1));
     }
 
     public void callWelcomeMenu(Player p){
         Call.menu(p.con, Resources.welcomeMenuId, "FoundationBattle", "Welcome to the open test of Foundation Battle!", new String[][]{
                 {"Close"},
                 {"Discord"}
+        });
+    }
+
+    public void callTeamMenu(Player p){
+        Call.menu(p.con, Resources.teamMenuId, "FoundationBattle", "Team Menu", new String[][]{
+                {"Join"},
+                {"Accept"},
+                {"Deny"},
+                {"Close"}
         });
     }
 
@@ -54,8 +79,17 @@ public class MenuManager {
 
     public void callAcceptMenu(Player p){
         Seq<Player> requesters = Resources.getRequesters(p);
+        if (requesters.isEmpty()) return;
         String[][] buttons = new String[requesters.size][1];
         for (int i = 0; i < requesters.size; i++) buttons[i][0] = requesters.get(i).name;
         Call.menu(p.con, Resources.AcceptMenuId, "FoundationBattle", "Accept Request", buttons);
+    }
+
+    public void callDenyMenu(Player p) {
+        Seq<Player> requesters = Resources.getRequesters(p);
+        if (requesters.isEmpty()) return;
+        String[][] buttons = new String[requesters.size][1];
+        for (int i = 0; i < requesters.size; i++) buttons[i][0] = requesters.get(i).name;
+        Call.menu(p.con, Resources.AcceptMenuId, "FoundationBattle", "Deny Request", buttons);
     }
 }
