@@ -2,7 +2,9 @@ package main;
 
 import arc.Events;
 import arc.util.CommandHandler;
+import arc.util.Time;
 import arc.util.Timer;
+import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.game.EventType;
 import mindustry.game.Team;
@@ -20,10 +22,28 @@ public class Main extends Plugin{
     private Timer.Task serverInfoTimerTask;
     @Override
     public void init(){
-        ///Setting up server
+        ///Setting up serverУ
         Administration.Config.serverName.set("[#5F9EA0]Foundation PvP");
         this.menuManager = new MenuManager();
         menuManager.init();
+        SettingsManager settingsManager = new SettingsManager();
+        settingsManager.init();
+
+        /// Adding action filter to block building out of team radius
+        Vars.netServer.admins.addActionFilter(action -> {
+            if (action.type == Administration.ActionType.placeBlock) {
+                if (action.block == Blocks.air || action.block instanceof CoreBlock || action.block == Blocks.vault) return true;
+                if (action.player == null || action.player.team().cores().isEmpty()) return false;
+                for (var core : action.player.team().cores()) {
+                    if (core.tile.dst(action.tile) <= Resources.buildRadius * 8) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            return true;
+        });
+
         /// Some kind of player's cache manipulations to properly transfer them to their teams after reconnect
         Events.on(EventType.PlayerJoin.class, event -> {
             menuManager.callWelcomeMenu(event.player);
@@ -53,6 +73,31 @@ public class Main extends Plugin{
            Groups.player.each(p -> p.team(Team.all[0]));
            Resources.team_leaders.clear();
            Resources.team_members.clear();
+           Resources.join_requests.clear();
+           Resources.votes.clear();
+           Resources.restartVotes.clear();
+        });
+
+        Events.on(EventType.BlockBuildEndEvent.class, event -> {
+            boolean close = false;
+            float mindist = 150f;
+            for (var build : Groups.build) {
+                if (build instanceof mindustry.world.blocks.storage.CoreBlock.CoreBuild & build.team() != event.team) {
+                    if (event.tile.dst(build.tile) < mindist * 5) {
+                        close = true;
+                        break;
+                    }
+                }
+            }
+            if (event.breaking || event.tile.block() != Blocks.vault)
+                return;
+            Team builderTeam = event.team;
+            Tile tile = event.tile;
+            if (close){
+                return;
+            }
+            Time.run(1f, () -> tile.setNet(Blocks.coreShard, builderTeam, 0));
+            Time.run(5f, Resources::updateAllTeamBorders);
         });
 
         Events.on(EventType.WorldLoadEndEvent.class, event -> {
@@ -101,12 +146,24 @@ public class Main extends Plugin{
                 }
             }, 0f, 60f);
         });
+
+        /// Refreshing settings on playEvent bsz here it works well
+        Events.on(EventType.PlayEvent.class, event -> settingsManager.setup());
+
+        Events.on(EventType.CoreChangeEvent.class, event -> Resources.updateAllTeamBorders());
     }
 
     public void registerClientCommands(CommandHandler handler){
         /// Player commands
         handler.<Player>register("spectate", "sss", (args, player) -> {
-            if (Resources.isLeader(player)) Resources.destroyTeam(player);
+            if (Resources.isLeader(player)) {
+                Team playerTeam = player.team();
+                Resources.destroyTeam(player);
+                Resources.team_leaders.remove(playerTeam);
+                Resources.team_members.remove(player.uuid());
+                player.team(Team.all[0]);
+                if (player.unit() != null) player.unit().kill();
+            }
             else {
                 player.team(Team.all[0]);
                 if (player.unit() != null) player.unit().kill();
@@ -168,5 +225,6 @@ public class Main extends Plugin{
         p.team(team);
         Resources.team_leaders.put(team, p.uuid());
         Resources.team_members.put(p.uuid(), team);
+        Resources.updateTeamBorders(team);
     }
 }

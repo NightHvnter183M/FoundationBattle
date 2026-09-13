@@ -90,6 +90,6 @@ public class MenuManager {
         if (requesters.isEmpty()) return;
         String[][] buttons = new String[requesters.size][1];
         for (int i = 0; i < requesters.size; i++) buttons[i][0] = requesters.get(i).name;
-        Call.menu(p.con, Resources.AcceptMenuId, "FoundationBattle", "Deny Request", buttons);
+        Call.menu(p.con, Resources.DenyMenuId, "FoundationBattle", "Deny Request", buttons);
     }
 }

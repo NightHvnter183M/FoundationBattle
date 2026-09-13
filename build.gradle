@@ -17,8 +17,8 @@ java {
 }
 
 dependencies {
-    compileOnly "com.github.Anuken.Mindustry:core:v159.7"
-    compileOnly "com.github.Anuken.Arc:arc-core:v159.7"
+    compileOnly "com.github.Anuken.Mindustry:core:v160.3"
+    compileOnly "com.github.Anuken.Arc:arc-core:v160.3"
 
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
