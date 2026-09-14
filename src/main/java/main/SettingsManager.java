@@ -3,10 +3,12 @@ package main;
 import arc.util.Time;
 import mindustry.Vars;
 import mindustry.content.Blocks;
+import mindustry.content.Items;
 import mindustry.content.Planets;
 import mindustry.game.Team;
 import mindustry.gen.Call;
 import mindustry.gen.Groups;
+import mindustry.type.ItemStack;
 import mindustry.world.blocks.storage.CoreBlock;
 
 public class SettingsManager {
@@ -15,6 +17,7 @@ public class SettingsManager {
         Blocks.coreFoundation.unitCapModifier = 2;
         Blocks.coreNucleus.unitCapModifier = 4;
         Blocks.illuminator.consPower.capacity = 0f;
+        Blocks.illuminator.requirements = new ItemStack[]{new ItemStack(Items.copper, 1)};
     }
 
     public void setup(){
