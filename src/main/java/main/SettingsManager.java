@@ -10,14 +10,14 @@ import mindustry.gen.Groups;
 import mindustry.world.blocks.storage.CoreBlock;
 
 public class SettingsManager {
-    public void init(){
+    public void init() {
+        // Server-side only: clients compute the cap with vanilla values, so their UI shows a higher limit.
         Blocks.coreShard.unitCapModifier = 1;
         Blocks.coreFoundation.unitCapModifier = 2;
         Blocks.coreNucleus.unitCapModifier = 4;
-        Blocks.illuminator.consPower.capacity = 0f;
     }
 
-    public void setup(){
+    public void setup() {
         Vars.state.rules.waves = false;
         Vars.state.rules.waveTimer = false;
         Vars.state.rules.pvp = false;
@@ -26,12 +26,18 @@ public class SettingsManager {
         Vars.state.rules.logicUnitBuild = true;
         Vars.state.rules.reactorExplosions = true;
         Vars.state.rules.coreCapture = true;
-        Vars.state.rules.defaultTeam = Team.all[0];
+        Vars.state.rules.defaultTeam = Team.derelict;
         Vars.state.rules.unitCap = 8;
         Vars.state.rules.planet = Planets.sun;
         Vars.state.rules.unitBuildSpeedMultiplier = 0.33f;
         Vars.state.rules.infiniteResources = true;
         Call.setRules(Vars.state.rules);
-        Time.run(2f, () -> Groups.build.each(b -> b instanceof CoreBlock.CoreBuild, b -> b.tile.removeNet()));
+        // remove the map's own cores; players found their teams themselves
+        Time.run(2f, () -> Groups.build.each(
+            b -> b instanceof CoreBlock.CoreBuild && !Resources.isTracked(b.team),
+            b -> {
+                Borders.queue(b.team); // removing a tile fires no core event, so take its border down explicitly
+                b.tile.removeNet();
+            }));
     }
 }
