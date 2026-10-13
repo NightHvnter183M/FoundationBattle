@@ -1,19 +1,18 @@
 package main;
 
 import arc.struct.Seq;
-import arc.util.Strings;
 import mindustry.Vars;
 import mindustry.game.Team;
 import mindustry.gen.Call;
 import mindustry.gen.Player;
 import mindustry.world.Tile;
 
-import static main.Resources.*;
 
 public class MenuManager {
     public enum RequestMode {ACCEPT, DENY, ASK}
     private final SnapshotMenu welcome = new SnapshotMenu();
     private final SnapshotMenu info = new SnapshotMenu();
+    private final SnapshotMenu language = new SnapshotMenu();
     private final SnapshotMenu team = new SnapshotMenu();
     private final SnapshotMenu join = new SnapshotMenu();
     private final SnapshotMenu requests = new SnapshotMenu();
@@ -24,159 +23,171 @@ public class MenuManager {
 
     private static final Runnable close = () -> {};
 
-    public void showWelcome(Player p) {
-        welcome.show(p, TITLE, """
-            Welcome to the open test of Foundation Battle!
+    private static String t(Player p, String key, Object... args) {
+        return Bundle.get(p, key, args);
+    }
 
-            [lightgray]Tap free ground to found your own team, or use [accent]/join[] to join one.""",
-            new SnapshotMenu.Options()
-                .add("How to play", () -> showInfo(p))
-                .row("Discord", () -> Call.openURI(p.con, DISCORD_URL), "Close", close));
+    public void showWelcome(Player p) {
+        welcome.show(p, t(p, "welcome.title"), t(p, "welcome.text"), new SnapshotMenu.Options()
+            .row(t(p, "menu.how-to-play"), () -> showInfo(p), t(p, "menu.language"), () -> showLanguage(p))
+            .row(t(p, "menu.discord"), () -> Call.openURI(p.con, Resources.DISCORD_URL), t(p, "menu.close"), close));
     }
 
     public void showInfo(Player p) {
-        info.show(p, "How to play", Strings.format("""
-            [accent]Teams[]
-            Tap free ground at least @ tiles away from other cores to found a team and lead it.
-            [accent]/join[] - ask to join a team, [accent]/team[] - team menu, [accent]/spectate[] - leave your team.
+        info.show(p, t(p, "info.title"),
+            t(p, "info.text", Resources.tiles(Resources.START_MIN_DISTANCE), Resources.tiles(Resources.BUILD_RADIUS),
+                Resources.tiles(Resources.VAULT_MIN_ENEMY_DISTANCE), Bundle.count("count.hours", Resources.ROUND_SECONDS / 3600)),
+            new SnapshotMenu.Options().add(t(p, "menu.close"), close));
+    }
 
-            [accent]Territory[]
-            You can build only within @ tiles of your cores - the circle around them.
-            A [accent]vault[] built at least @ tiles away from enemy cores turns into a new core.
+    public void showLanguage(Player p) {
+        String picked = Bundle.picked(p);
+        String game = Bundle.match(p.locale());
+        String gameName = Bundle.languageName(game != null ? game : Bundle.serverDefault());
+        SnapshotMenu.Options options = new SnapshotMenu.Options();
+        options.add(mark(picked == null, t(p, "lang.auto", gameName)), () -> {
+            Bundle.pick(p, null);
+            Bundle.send(p, "lang.auto-set", Bundle.languageName(Bundle.lang(p)));
+        });
+        for (String lang : Bundle.languages()) {
+            options.add(mark(lang.equals(picked), Bundle.languageName(lang)), () -> {
+                Bundle.pick(p, lang);
+                Bundle.send(p, "lang.changed", Bundle.languageName(lang));
+            });
+        }
+        options.add(t(p, "menu.close"), close);
+        language.show(p, t(p, "lang.title"), t(p, "lang.text", Bundle.languageName(Bundle.lang(p))), options);
+    }
 
-            [accent]Round[]
-            A round lasts @ hours. [accent]/restart[] starts a vote to end it early.""",
-            (int) START_MIN_DISTANCE, (int) BUILD_RADIUS, (int) VAULT_MIN_ENEMY_DISTANCE, ROUND_SECONDS / 3600),
-            new SnapshotMenu.Options().add("Close", close));
+    private static String mark(boolean current, String label) {
+        return current ? "[accent]> " + label + " <" : label;
     }
 
     public void showTeam(Player p) {
         Team t = p.team();
         SnapshotMenu.Options options = new SnapshotMenu.Options();
-        if (!isTracked(t)) {
-            options.add("Join a team", () -> showJoin(p))
-                .add("How to play", () -> showInfo(p))
-                .add("Close", close);
-            team.show(p, "Team", "[lightgray]You are a spectator.\nTap free ground to found a team or join an existing one.", options);
+        if (!Resources.isTracked(t)) {
+            options.add(t(p, "team.menu.join"), () -> showJoin(p))
+                .add(t(p, "menu.how-to-play"), () -> showInfo(p))
+                .add(t(p, "menu.close"), close);
+            team.show(p, t(p, "team.menu.title"), t(p, "team.menu.spectator"), options);
             return;
         }
 
-        String text = Strings.format("@\n[lightgray]Leader: @[lightgray]  |  online: @  |  cores: @",
-            teamName(t), nameOf(teamLeaders.get(t)), onlineCount(t), t.cores().size);
-        if (isLeader(p)) {
-            options.add("Join requests (" + requesters(t).size + ")", () -> showRequests(p, RequestMode.ASK))
-                .row("Kick member", () -> showMembers(p, true), "Make leader", () -> showMembers(p, false))
-                .add("Leave team", () -> confirmLeave(p))
-                .add("Close", close);
+        String text = t(p, "team.menu.info", Resources.teamName(t), Resources.nameOf(Resources.teamLeaders.get(t)),
+            Resources.onlineCount(t), Resources.coreSummary(t));
+        if (Resources.isLeader(p)) {
+            options.add(t(p, "team.menu.requests", Resources.requesters(t).size), () -> showRequests(p, RequestMode.ASK))
+                .row(t(p, "team.menu.kick"), () -> showMembers(p, true), t(p, "team.menu.make-leader"), () -> showMembers(p, false))
+                .add(t(p, "team.menu.leave"), () -> confirmLeave(p))
+                .add(t(p, "menu.close"), close);
         } else {
-            options.add("Join another team", () -> showJoin(p))
-                .add("Leave team", () -> confirmLeave(p))
-                .add("Close", close);
+            options.add(t(p, "team.menu.join-other"), () -> showJoin(p))
+                .add(t(p, "team.menu.leave"), () -> confirmLeave(p))
+                .add(t(p, "menu.close"), close);
         }
-        team.show(p, "Team", text, options);
+        team.show(p, t(p, "team.menu.title"), text, options);
     }
 
     public void showJoin(Player p) {
-        if (isLeader(p)) {
-            p.sendMessage("[scarlet]A leader can't join another team. Leave yours first (/spectate).");
+        if (Resources.isLeader(p)) {
+            Bundle.send(p, "join.leader-cant");
             return;
         }
-        Seq<Team> teams = teamLeaders.keys().toSeq().select(t -> t != p.team() && onlineLeader(t) != null);
+        Seq<Team> teams = Resources.teamLeaders.keys().toSeq().select(t -> t != p.team() && Resources.onlineLeader(t) != null);
         if (teams.isEmpty()) {
-            p.sendMessage("[lightgray]There are no teams to join right now. Tap free ground to found your own!");
+            Bundle.send(p, "join.none");
             return;
         }
-        teams.sort(t -> -onlineCount(t));
+        teams.sort(t -> -Resources.onlineCount(t));
         SnapshotMenu.Options options = new SnapshotMenu.Options();
         for (Team t : teams) {
-            options.add(teamName(t) + " [lightgray](" + onlineCount(t) + " online)", () -> requestJoin(p, t));
+            options.add(t(p, "join.option", Resources.teamName(t), Resources.onlineCount(t)), () -> Resources.requestJoin(p, t));
         }
-        options.add("Close", close);
-        join.show(p, "Join a team", "Pick a team. Its leader will get your request.", options);
+        options.add(t(p, "menu.close"), close);
+        join.show(p, t(p, "join.title"), t(p, "join.text"), options);
     }
 
     public void showRequests(Player p, RequestMode mode) {
-        if (!isLeader(p)) {
-            p.sendMessage("[scarlet]Only the team leader can answer join requests.");
+        if (!Resources.isLeader(p)) {
+            Bundle.send(p, "requests.leader-only");
             return;
         }
-        Seq<Player> list = requesters(p.team());
+        Seq<Player> list = Resources.requesters(p.team());
         if (list.isEmpty()) {
-            p.sendMessage("[lightgray]No pending join requests.");
+            Bundle.send(p, "requests.none");
             return;
         }
         SnapshotMenu.Options options = new SnapshotMenu.Options();
         for (Player r : list) {
             options.add(r.name, () -> {
                 switch (mode) {
-                    case ACCEPT -> acceptRequest(p, r);
-                    case DENY -> denyRequest(p, r);
+                    case ACCEPT -> Resources.acceptRequest(p, r);
+                    case DENY -> Resources.denyRequest(p, r);
                     default -> showDecision(p, r);
                 }
             });
         }
-        options.add("Close", close);
+        options.add(t(p, "menu.close"), close);
         String title = switch (mode) {
-            case ACCEPT -> "Accept a request";
-            case DENY -> "Deny a request";
-            default -> "Join requests";
+            case ACCEPT -> t(p, "requests.title.accept");
+            case DENY -> t(p, "requests.title.deny");
+            default -> t(p, "requests.title");
         };
-        requests.show(p, title, "Players who want to join your team:", options);
+        requests.show(p, title, t(p, "requests.text"), options);
     }
 
     private void showDecision(Player leader, Player r) {
-        decision.show(leader, "Join request", r.name + "[white] wants to join your team.",
-            new SnapshotMenu.Options()
-                .row("[green]Accept", () -> acceptRequest(leader, r), "[scarlet]Deny", () -> denyRequest(leader, r))
-                .add("Back", () -> showRequests(leader, RequestMode.ASK)));
+        decision.show(leader, t(leader, "decision.title"), t(leader, "decision.text", r.name), new SnapshotMenu.Options()
+            .row(t(leader, "decision.accept"), () -> Resources.acceptRequest(leader, r),
+                t(leader, "decision.deny"), () -> Resources.denyRequest(leader, r))
+            .add(t(leader, "menu.back"), () -> showRequests(leader, RequestMode.ASK)));
     }
 
     private void showMembers(Player p, boolean kick) {
-        if (!isLeader(p)) return;
+        if (!Resources.isLeader(p)) return;
         SnapshotMenu.Options options = new SnapshotMenu.Options();
-        for (String uuid : memberUuids(p.team())) {
+        for (String uuid : Resources.memberUuids(p.team())) {
             if (uuid.equals(p.uuid())) continue;
-            Player online = findOnline(uuid);
+            Player online = Resources.findOnline(uuid);
             if (!kick && online == null) continue;
-            String name = nameOf(uuid);
+            String name = Resources.nameOf(uuid);
             if (kick) {
-                options.add(name + (online == null ? " [lightgray](offline)" : ""), () ->
-                    ask(p, "Kick member?", name + "[white] will be removed from the team.", "Kick", () -> Resources.kick(p, uuid)));
+                options.add(online == null ? t(p, "members.offline", name) : name, () -> ask(p, t(p, "members.kick.confirm.title"),
+                    t(p, "members.kick.confirm.text", name), t(p, "members.kick.confirm.yes"), () -> Resources.kick(p, uuid)));
             } else {
-                options.add(name, () ->
-                    ask(p, "Make leader?", name + "[white] will lead the team instead of you.", "Confirm", () -> transferLeadership(p, online)));
+                options.add(name, () -> ask(p, t(p, "members.leader.confirm.title"),
+                    t(p, "members.leader.confirm.text", name), t(p, "members.leader.confirm.yes"),
+                    () -> Resources.transferLeadership(p, online)));
             }
         }
         if (options.isEmpty()) {
-            p.sendMessage(kick ? "[lightgray]There is nobody else in your team." : "[lightgray]No other members are online.");
+            Bundle.send(p, kick ? "members.nobody" : "members.nobody-online");
             return;
         }
-        options.add("Back", () -> showTeam(p));
-        members.show(p, kick ? "Kick member" : "Make leader", kick ? "Choose a member to remove:" : "Choose the new leader:", options);
+        options.add(t(p, "menu.back"), () -> showTeam(p));
+        members.show(p, t(p, kick ? "members.kick.title" : "members.leader.title"),
+            t(p, kick ? "members.kick.text" : "members.leader.text"), options);
     }
 
     public void confirmLeave(Player p) {
         String text;
-        if (!isLeader(p)) {
-            text = "You will become a spectator.";
-        } else if (memberUuids(p.team()).size <= 1) {
-            text = "[scarlet]You are the last member: your team will be destroyed.[]\nIts cores disappear and its buildings become derelict.";
-        } else {
-            text = "Another member will lead the team.";
-        }
-        ask(p, "Leave the team?", text, "Leave", () -> leaveTeam(p));
+        if (!Resources.isLeader(p)) text = t(p, "leave.confirm.member");
+        else if (Resources.memberUuids(p.team()).size <= 1) text = t(p, "leave.confirm.last");
+        else text = t(p, "leave.confirm.leader");
+        ask(p, t(p, "leave.confirm.title"), text, t(p, "leave.confirm.yes"), () -> Resources.leaveTeam(p));
     }
 
     public void showFound(Player p, Tile tile) {
         int x = tile.x, y = tile.y;
-        found.show(p, "Found a team?", Strings.format("Place your core at ([accent]@[], [accent]@[])?\n[lightgray]You'll lead the new team; others join with /join.", x, y),
-            new SnapshotMenu.Options().row("[accent]Found team", () -> {
+        found.show(p, t(p, "found.title"), t(p, "found.text", x, y), new SnapshotMenu.Options()
+            .row(t(p, "found.yes"), () -> {
                 Tile now = Vars.world.tile(x, y); // the tile of the current map, not a stale one
-                if (now != null) foundTeam(p, now);
-            }, "Cancel", () -> block(p, "tap", 3000)));
+                if (now != null) Resources.foundTeam(p, now);
+            }, t(p, "menu.cancel"), () -> Resources.block(p, "tap", 3000)));
     }
 
     private void ask(Player p, String title, String text, String yes, Runnable action) {
-        confirm.show(p, title, text, new SnapshotMenu.Options().row(yes, action, "Cancel", close));
+        confirm.show(p, title, text, new SnapshotMenu.Options().row(yes, action, t(p, "menu.cancel"), close));
     }
 }

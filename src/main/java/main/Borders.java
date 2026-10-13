@@ -29,7 +29,6 @@ import java.lang.reflect.Method;
 
 public class Borders {
     private static final MarkerApi markers = MarkerApi.find();
-
     private static IntIntMap markerTeams = new IntIntMap();
     private static IntIntMap removals = new IntIntMap();
     private static final ObjectMap<Team, IntSet> lamps = new ObjectMap<>();

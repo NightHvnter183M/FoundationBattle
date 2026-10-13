@@ -1,5 +1,6 @@
 package main;
 
+import arc.struct.ObjectIntMap;
 import arc.struct.ObjectMap;
 import arc.struct.ObjectSet;
 import arc.struct.Seq;
@@ -7,22 +8,25 @@ import arc.util.Strings;
 import arc.util.Time;
 import mindustry.Vars;
 import mindustry.content.Blocks;
+import mindustry.content.Fx;
 import mindustry.game.Team;
 import mindustry.game.Teams.TeamData;
 import mindustry.gen.Call;
 import mindustry.gen.Groups;
+import mindustry.gen.Iconc;
 import mindustry.gen.Player;
 import mindustry.net.Administration;
 import mindustry.world.Tile;
 import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
 
 public class Resources {
+    public static final String PLUGIN_ID = "foundation-battle";
     public static final float BUILD_RADIUS = 35f;
     public static final float START_MIN_DISTANCE = 125f;
     public static final float VAULT_MIN_ENEMY_DISTANCE = 93.75f;
     public static final int ROUND_SECONDS = 3 * 60 * 60;
     public static final int JOIN_REQUEST_COOLDOWN = 10;
-    public static final String TITLE = "Foundation Battle";
+
     public static final String DISCORD_URL = "https://discord.gg/xxxxxxx";
 
     public static String custommotd = """
@@ -34,9 +38,9 @@ public class Resources {
     public static final ObjectMap<Team, String> teamNames = new ObjectMap<>();
     public static final ObjectMap<String, Team> joinRequests = new ObjectMap<>();
     public static final ObjectSet<String> welcomed = new ObjectSet<>();
+    private static final ObjectIntMap<Team> knownMainCores = new ObjectIntMap<>();
     private static final ObjectMap<String, Long> cooldowns = new ObjectMap<>();
     private static final Seq<Tile> tmpTiles = new Seq<>();
-
 
     public static boolean isTracked(Team team) {
         return teamLeaders.containsKey(team);
@@ -48,6 +52,32 @@ public class Resources {
 
     public static boolean isSpectator(Player p) {
         return p.team() == Team.derelict;
+    }
+
+    public static boolean isMainCore(CoreBuild core) {
+        return core.block != Blocks.coreShard;
+    }
+
+    public static int mainCores(Team team) {
+        return team.cores().count(Resources::isMainCore);
+    }
+
+    public static boolean isAlive(Team team) {
+        return mainCores(team) > 0;
+    }
+
+    public static String coreSummary(Team team) {
+        int nucleus = 0, foundation = 0, shard = 0;
+        for (CoreBuild core : team.cores()) {
+            if (core.block == Blocks.coreNucleus) nucleus++;
+            else if (core.block == Blocks.coreFoundation) foundation++;
+            else if (core.block == Blocks.coreShard) shard++;
+        }
+        StringBuilder out = new StringBuilder("[white]");
+        if (nucleus > 0) out.append(Iconc.blockCoreNucleus).append(' ').append(nucleus).append("  ");
+        if (foundation > 0) out.append(Iconc.blockCoreFoundation).append(' ').append(foundation).append("  ");
+        if (shard > 0) out.append(Iconc.blockCoreShard).append(' ').append(shard);
+        return out.toString().trim();
     }
 
     public static String teamName(Team team) {
@@ -75,7 +105,7 @@ public class Resources {
         Player online = findOnline(uuid);
         if (online != null) return online.name;
         Administration.PlayerInfo info = Vars.netServer.admins.getInfoOptional(uuid);
-        return info == null ? "unknown" : info.lastName;
+        return info == null ? "?" : info.lastName;
     }
 
     public static Seq<String> memberUuids(Team team) {
@@ -119,22 +149,23 @@ public class Resources {
         return a.dst(b) / Vars.tilesize;
     }
 
-    public static String foundBlocker(Tile tile) {
+    public static Bundle.Text tiles(float amount) {
+        return Bundle.count("count.tiles", (int) amount);
+    }
+
+    public static Bundle.Text foundBlocker(Tile tile) {
         CoreBuild near = nearestCore(tile, null);
         if (near != null) {
             float dist = tilesBetween(tile, near.tile);
             if (dist < START_MIN_DISTANCE) {
-                return Strings.format("Too close to the core of @[scarlet]: @ tiles, need at least @.",
-                    teamName(near.team), (int) dist, (int) START_MIN_DISTANCE);
+                return Bundle.text("found.too-close", teamName(near.team), tiles(dist), tiles(START_MIN_DISTANCE));
             }
         }
         int size = Blocks.coreNucleus.size;
         tile.getLinkedTilesAs(Blocks.coreNucleus, tmpTiles);
-        if (tmpTiles.size < size * size) return "Too close to the map edge.";
+        if (tmpTiles.size < size * size) return Bundle.text("found.map-edge");
         for (Tile t : tmpTiles) {
-            if (t.block() != Blocks.air || t.floor().isDeep() || t.floor().solid) {
-                return Strings.format("The core needs a clear @x@ area of dry ground.", size, size);
-            }
+            if (t.block() != Blocks.air || t.floor().isDeep() || t.floor().solid) return Bundle.text("found.no-space", size);
         }
         return null;
     }
@@ -152,26 +183,25 @@ public class Resources {
 
     public static void foundTeam(Player p, Tile tile) {
         if (!isSpectator(p)) {
-            p.sendMessage("[scarlet]You are already in a team.");
+            Bundle.send(p, "found.already-in-team");
             return;
         }
-        String blocker = foundBlocker(tile);
+        Bundle.Text blocker = foundBlocker(tile);
         if (blocker != null) {
-            p.sendMessage("[scarlet]" + blocker);
+            Bundle.send(p, blocker);
             return;
         }
         Team team = freeTeam();
         if (team == null) {
-            p.sendMessage("[scarlet]No free team slots left.");
+            Bundle.send(p, "found.no-slots");
             return;
         }
         tile.setNet(Blocks.coreNucleus, team, 0);
         teamLeaders.put(team, p.uuid());
         teamNames.put(team, displayName(p));
         addMember(p, team);
-        Call.sendMessage(Strings.format("@[accent] founded the team @[accent].", p.name, teamName(team)));
-        p.sendMessage(Strings.format("[accent]You lead @[accent] now.[] Build within @ tiles of your cores; a vault far from enemies becomes a new core. [accent]/team[] opens the team menu.",
-            teamName(team), (int) BUILD_RADIUS));
+        Bundle.sendAll("team.founded", teamName(team));
+        Bundle.send(p, "team.founded.you", teamName(team), tiles(BUILD_RADIUS));
     }
 
     private static Team freeTeam() {
@@ -190,63 +220,63 @@ public class Resources {
 
     public static void setLeader(Team team, String uuid) {
         teamLeaders.put(team, uuid);
-        teamMessage(team, "[accent]" + nameOf(uuid) + "[accent] is the team leader now.");
+        Bundle.sendTeam(team, "team.new-leader", nameOf(uuid));
     }
 
     public static void requestJoin(Player p, Team team) {
         if (isLeader(p)) {
-            p.sendMessage("[scarlet]A leader can't join another team. Leave yours first (/spectate).");
+            Bundle.send(p, "join.leader-cant");
             return;
         }
         if (p.team() == team) {
-            p.sendMessage("[lightgray]You are already in this team.");
+            Bundle.send(p, "join.same-team");
             return;
         }
         Player leader = onlineLeader(team);
         if (!isTracked(team) || leader == null) {
-            p.sendMessage("[scarlet]This team can't take requests right now.");
+            Bundle.send(p, "join.unavailable");
             return;
         }
         if (joinRequests.get(p.uuid()) == team) {
-            p.sendMessage("[lightgray]Your request is already waiting for the leader.");
+            Bundle.send(p, "join.already-requested");
             return;
         }
         if (!ready(p, "join", JOIN_REQUEST_COOLDOWN * 1000L)) {
-            p.sendMessage("[scarlet]Wait a few seconds before sending another request.");
+            Bundle.send(p, "join.cooldown");
             return;
         }
         joinRequests.put(p.uuid(), team);
-        p.sendMessage("[accent]Request sent to " + teamName(team) + "[accent]. Wait for the leader's answer.");
-        leader.sendMessage("[accent]" + p.name + "[accent] wants to join your team. [white]/accept[] or [white]/team");
+        Bundle.send(p, "join.sent", teamName(team));
+        Bundle.send(leader, "join.incoming", p.name);
     }
 
     public static void acceptRequest(Player leader, Player requester) {
         Team team = leader.team();
         if (!isLeader(leader) || !requester.isAdded() || joinRequests.get(requester.uuid()) != team || isLeader(requester)) {
             joinRequests.remove(requester.uuid());
-            leader.sendMessage("[lightgray]This request is no longer valid.");
+            Bundle.send(leader, "request.invalid");
             return;
         }
         addMember(requester, team);
-        requester.sendMessage("[accent]You joined " + teamName(team) + "[accent]!");
-        teamMessage(team, "[accent]" + requester.name + "[accent] joined the team.");
+        Bundle.send(requester, "request.accepted", teamName(team));
+        Bundle.sendTeam(team, "team.joined", requester.name);
     }
 
     public static void denyRequest(Player leader, Player requester) {
         Team team = leader.team();
         if (!isLeader(leader) || joinRequests.get(requester.uuid()) != team) {
-            leader.sendMessage("[lightgray]This request is no longer valid.");
+            Bundle.send(leader, "request.invalid");
             return;
         }
         joinRequests.remove(requester.uuid());
-        requester.sendMessage(teamName(team) + "[scarlet] declined your request.");
-        leader.sendMessage("[lightgray]Declined " + requester.name + "[lightgray].");
+        Bundle.send(requester, "request.declined", teamName(team));
+        Bundle.send(leader, "request.declined.leader", requester.name);
     }
 
     public static void kick(Player leader, String uuid) {
         Team team = leader.team();
         if (!isLeader(leader) || uuid.equals(leader.uuid()) || teamMembers.get(uuid) != team) {
-            leader.sendMessage("[lightgray]This player is not in your team anymore.");
+            Bundle.send(leader, "kick.not-member");
             return;
         }
         String name = nameOf(uuid);
@@ -254,20 +284,19 @@ public class Resources {
         Player target = findOnline(uuid);
         if (target != null && target.team() == team) {
             moveToTeam(target, Team.derelict);
-            target.sendMessage("[scarlet]You were removed from " + teamName(team) + "[scarlet].");
+            Bundle.send(target, "kick.you", teamName(team));
         }
-        teamMessage(team, "[lightgray]" + name + "[lightgray] was removed from the team.");
+        Bundle.sendTeam(team, "kick.team", name);
     }
 
     public static void transferLeadership(Player leader, Player target) {
         if (!isLeader(leader) || target == null || !target.isAdded() || target.team() != leader.team() || target == leader) {
-            leader.sendMessage("[lightgray]This player can't lead your team right now.");
+            Bundle.send(leader, "leader.unavailable");
             return;
         }
         setLeader(leader.team(), target.uuid());
     }
 
-    /** The player becomes a spectator. A leader hands the team to someone else; the last member disbands it. */
     public static void leaveTeam(Player p) {
         Team team = p.team();
         if (!isTracked(team)) {
@@ -280,14 +309,14 @@ public class Resources {
         if (leader) {
             String next = nextLeader(team, p.uuid());
             if (next == null) {
-                disband(team, "[lightgray]You left and your team was disbanded.");
+                disband(team, "leave.disbanded");
                 return;
             }
             setLeader(team, next);
         }
         moveToTeam(p, Team.derelict);
-        teamMessage(team, "[lightgray]" + p.name + "[lightgray] left the team.");
-        p.sendMessage("[lightgray]You left " + teamName(team) + "[lightgray]. Tap free ground to found a team or use /join.");
+        Bundle.sendTeam(team, "leave.team", p.name);
+        Bundle.send(p, "leave.you", teamName(team));
     }
 
     private static String nextLeader(Team team, String except) {
@@ -299,14 +328,14 @@ public class Resources {
         return null;
     }
 
-    public static void disband(Team team, String messageToMembers) {
+    public static void disband(Team team, String messageKey) {
         forget(team);
         Seq<Tile> coreTiles = team.cores().map(c -> c.tile);
         coreTiles.each(Tile::removeNet);
         for (Player p : online()) {
             if (p.team() != team) continue;
             moveToTeam(p, Team.derelict);
-            p.sendMessage(messageToMembers);
+            Bundle.send(p, messageKey);
         }
         Borders.clear(team);
         team.data().destroyToDerelict();
@@ -314,28 +343,42 @@ public class Resources {
 
     public static void eliminate(Team team, Team by) {
         String name = teamName(team);
-        String killer = by != null && by != team && by != Team.derelict ? "[scarlet] by " + teamName(by) : "";
+        boolean byEnemy = by != null && by != team && by != Team.derelict;
+        String attacker = byEnemy ? teamName(by) : null;
         forget(team);
-        Call.sendMessage("[scarlet]Team " + name + "[scarlet] was destroyed" + killer + "[scarlet].");
+        if (byEnemy) Bundle.sendAll("team.destroyed-by", name, attacker);
+        else Bundle.sendAll("team.destroyed", name);
         for (Player p : online()) {
             if (p.team() != team) continue;
             moveToTeam(p, Team.derelict);
-            p.sendMessage("[scarlet]Your team was destroyed.[] Tap free ground to found a new one or use /join.");
+            Bundle.send(p, "team.destroyed.you");
         }
         Borders.clear(team);
-        team.data().destroyToDerelict(); // no cores left, so nothing can be captured
+        for (CoreBuild core : team.cores().copy()) {
+            Call.effectReliable(Fx.massiveExplosion, core.x, core.y, 0f, team.color);
+            core.tile.removeNet();
+        }
+        team.data().destroyToDerelict(); // no cores left now, so nothing can be captured
     }
 
     public static void checkEliminations(CoreBuild changed) {
         for (Team team : teamLeaders.keys().toSeq()) {
-            if (!team.cores().isEmpty()) continue;
-            eliminate(team, changed != null && changed.team == team ? changed.lastDamage : null);
+            int main = mainCores(team);
+            int before = knownMainCores.get(team, main);
+            knownMainCores.put(team, main);
+            if (main == 0) {
+                eliminate(team, changed != null && changed.team == team ? changed.lastDamage : null);
+            } else if (main < before) {
+                if (main == 1) Bundle.sendTeam(team, "team.last-main-core");
+                else Bundle.sendTeam(team, "team.main-core-lost", main);
+            }
         }
     }
 
     private static void forget(Team team) {
         teamLeaders.remove(team);
         teamNames.remove(team);
+        knownMainCores.remove(team, 0);
         Seq<String> gone = memberUuids(team);
         gone.each(teamMembers::remove);
         gone.clear();
@@ -347,7 +390,7 @@ public class Resources {
 
     public static Team assign(Player p) {
         Team team = teamMembers.get(p.uuid());
-        if (team != null && isTracked(team) && !team.cores().isEmpty()) return team;
+        if (team != null && isTracked(team) && isAlive(team)) return team;
         teamMembers.remove(p.uuid());
         return Team.derelict;
     }
@@ -372,13 +415,7 @@ public class Resources {
         teamNames.clear();
         joinRequests.clear();
         cooldowns.clear();
-    }
-
-
-    public static void teamMessage(Team team, String message) {
-        for (Player p : online()) {
-            if (p.team() == team) p.sendMessage(message);
-        }
+        knownMainCores.clear();
     }
 
     public static boolean ready(Player p, String key, long millis) {
@@ -394,21 +431,25 @@ public class Resources {
         cooldowns.put(p.uuid() + "/" + key, Time.millis() + millis);
     }
 
-    public static void hint(Player p, String key, String message) {
-        if (ready(p, "hint/" + key, 3000)) p.sendMessage(message);
+
+    public static void hint(Player p, String kind, Bundle.Text text) {
+        if (ready(p, "hint/" + kind, 3000)) Bundle.send(p, text);
     }
 
-    public static String standings() {
+    public static Bundle.Text standings() {
         Seq<Team> teams = teamLeaders.keys().toSeq().select(t -> !t.cores().isEmpty());
         teams.sort(t -> -t.cores().size);
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < Math.min(3, teams.size); i++) {
-            Team t = teams.get(i);
-            int cores = t.cores().size;
-            out.append(i + 1).append(". ").append(teamName(t)).append(" [lightgray]- ")
-                .append(cores).append(cores == 1 ? " core" : " cores").append("[]\n");
-        }
-        return out.toString();
+        teams.truncate(3);
+        Seq<String> names = teams.map(Resources::teamName);
+        int[] cores = new int[teams.size];
+        for (int i = 0; i < teams.size; i++) cores[i] = teams.get(i).cores().size;
+        return lang -> {
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < cores.length; i++) {
+                out.append(Bundle.get(lang, "standings.line", i + 1, names.get(i), Bundle.count("count.cores", cores[i]))).append('\n');
+            }
+            return out.toString();
+        };
     }
 
 }

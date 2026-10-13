@@ -6,12 +6,10 @@ import arc.math.Mathf;
 import arc.struct.ObjectIntMap;
 import arc.struct.ObjectSet;
 import arc.struct.Seq;
-import arc.util.Strings;
 import arc.util.Timer;
 import mindustry.Vars;
 import mindustry.game.EventType;
 import mindustry.game.Team;
-import mindustry.gen.Call;
 import mindustry.gen.Groups;
 import mindustry.gen.Player;
 import mindustry.maps.Map;
@@ -25,9 +23,10 @@ public class RestartManager {
     private static final Seq<Map> mapOptions = new Seq<>();
     private static final ObjectIntMap<String> mapVotes = new ObjectIntMap<>();
     private static final ObjectSet<String> restartVotes = new ObjectSet<>();
+
     private static boolean restartVoting, mapVoting;
     private static Timer.Task restartVoteTask, mapVoteTask;
-    private static String standings = "";
+    private static Bundle.Text standings = lang -> "";
 
     public static void onJoin(Player p) {
         if (mapVoting) showMapVote(p);
@@ -43,7 +42,7 @@ public class RestartManager {
 
     public static void vote(Player p) {
         if (isEnding()) {
-            p.sendMessage("[lightgray]The round is already ending.");
+            Bundle.send(p, "restart.ending");
             return;
         }
         if (!restartVoting) {
@@ -53,15 +52,14 @@ public class RestartManager {
             restartVoteTask = Timer.schedule(() -> {
                 if (!restartVoting) return;
                 stopRestartVote();
-                Call.sendMessage("[scarlet]Not enough votes to end the round.");
+                Bundle.sendAll("restart.failed");
             }, RESTART_VOTE_SECONDS);
-            Call.sendMessage(Strings.format("@[accent] wants to end the round. Type [white]/restart[accent] to agree. ([green]@[accent]/[orange]@[accent], @ min)",
-                p.name, votes(), needed(), RESTART_VOTE_SECONDS / 60));
+            Bundle.sendAll("restart.started", p.name, votes(), needed(), Bundle.count("count.minutes", RESTART_VOTE_SECONDS / 60));
         } else if (!restartVotes.add(p.uuid())) {
-            p.sendMessage("[lightgray]You have already voted.");
+            Bundle.send(p, "restart.already-voted");
             return;
         } else {
-            Call.sendMessage(Strings.format("@[accent] voted to end the round. ([green]@[accent]/[orange]@[accent])", p.name, votes(), needed()));
+            Bundle.sendAll("restart.voted", p.name, votes(), needed());
         }
         checkRestartVote();
     }
@@ -75,7 +73,7 @@ public class RestartManager {
     }
 
     private static void checkRestartVote() {
-        if (restartVoting && votes() >= needed()) startMapVote("[accent]The vote passed!");
+        if (restartVoting && votes() >= needed()) startMapVote("round.vote-passed");
     }
 
     private static void stopRestartVote() {
@@ -85,7 +83,7 @@ public class RestartManager {
         restartVoteTask = null;
     }
 
-    public static void startMapVote(String reason) {
+    public static void startMapVote(String reasonKey) {
         if (isEnding()) return;
         stopRestartVote();
         standings = Resources.standings();
@@ -94,7 +92,7 @@ public class RestartManager {
         if (pool.isEmpty()) pool = Vars.maps.all().copy();
         if (pool.size > 1) pool.remove(Vars.state.map, true);
         if (pool.isEmpty()) {
-            Call.sendMessage(reason);
+            Bundle.sendAll(reasonKey);
             Events.fire(new EventType.GameOverEvent(Team.derelict));
             return;
         }
@@ -104,7 +102,7 @@ public class RestartManager {
         mapVotes.clear();
         mapVoting = true;
 
-        Call.sendMessage(reason + "[lightgray] Vote for the next map - " + MAP_VOTE_SECONDS + " seconds.");
+        Bundle.sendAll("mapvote.start", Bundle.text(reasonKey), Bundle.count("count.seconds", MAP_VOTE_SECONDS));
         Resources.online().each(RestartManager::showMapVote);
         mapVoteTask = Timer.schedule(RestartManager::finishMapVote, MAP_VOTE_SECONDS);
     }
@@ -116,11 +114,12 @@ public class RestartManager {
             options.add(mapOptions.get(i).name(), () -> {
                 if (!mapVoting) return;
                 mapVotes.put(p.uuid(), index);
-                p.sendMessage("[lightgray]Your vote: []" + mapOptions.get(index).name());
+                Bundle.send(p, "mapvote.your-vote", mapOptions.get(index).name());
             });
         }
-        String text = (standings.isEmpty() ? "" : "[accent]Top teams[]\n" + standings + "\n") + "Choose the next map:";
-        mapMenu.show(p, "Round is over!", text, options);
+        String top = Bundle.get(p, standings);
+        String text = (top.isEmpty() ? "" : Bundle.get(p, "mapvote.top") + "\n" + top + "\n") + Bundle.get(p, "mapvote.choose");
+        mapMenu.show(p, Bundle.get(p, "mapvote.title"), text, options);
     }
 
     private static void finishMapVote() {
@@ -135,7 +134,7 @@ public class RestartManager {
             if (counts[i] > counts[best]) best = i;
         }
         Map next = mapOptions.get(best);
-        Call.sendMessage(Strings.format("[accent]Next map: [white]@[lightgray] (@ @)", next.name(), counts[best], counts[best] == 1 ? "vote" : "votes"));
+        Bundle.sendAll("mapvote.result", next.name(), Bundle.count("count.votes", counts[best]));
         Vars.maps.setNextMapOverride(next);
         Events.fire(new EventType.GameOverEvent(Team.derelict));
     }
@@ -147,6 +146,6 @@ public class RestartManager {
         mapOptions.clear();
         if (mapVoteTask != null) mapVoteTask.cancel();
         mapVoteTask = null;
-        standings = "";
+        standings = lang -> "";
     }
 }
